@@ -1,19 +1,132 @@
-var http = require('http'),
+var express = require('express'),
+    app = express(),
+    multer = require('multer'),
     browserify = require('browserify'),
     literalify = require('literalify'),
     React = require('react'),
     DOM = React.DOM, body = DOM.body, div = DOM.div, script = DOM.script,
 // This is our React component, shared by server and browser thanks to browserify
     App = React.createFactory(require('./App'))
-var Iconv  = require('iconv').Iconv;
+//var Iconv  = require('iconv').Iconv;
 
-var parseString = require('xml2js').parseString;
+//var parseString = require('xml2js').parseString;
 var CKIPsocket = require('./components/connectsocket');
 
-
+    CKIPsocket.connectToCKIP();
 // Just create a plain old HTTP server that responds to two endpoints ('/' and
 // '/bundle.js') This would obviously work similarly with any higher level
 // library (Express, etc)
+
+
+//app.use(bodyParser.json()); // for parsing application/json
+//app.use(bodyParser.urlencoded({ extended: true })); // for parsing application/x-www-form-urlencoded
+app.use(multer());
+
+
+app.get('/',function(req,res){
+
+    req.on("close", function() {
+        console.log('i am close');
+    });
+
+    req.on("end", function() {
+        console.log('i am end');
+    });
+
+
+
+
+    res.setHeader('Content-Type', 'text/html')
+
+    var props = {
+        items: [
+            'Item 0',
+            'Item 1',
+            'Item </script>',
+            'Item <!--inject!-->',
+        ]
+    }
+
+
+    var html = React.renderToStaticMarkup(body(null,
+
+        // The actual server-side rendering of our component occurs here, and we
+        // pass our data in as `props`. This div is the same one that the client
+        // will "render" into on the browser in the script tag below
+        div({id: 'content', dangerouslySetInnerHTML: {
+            __html: React.renderToString(App(props))
+        }}),
+
+        // We'll load React from a CDN - you don't have to do this,
+        // you can bundle it up or serve it locally if you like
+        script({src: '//fb.me/react-0.13.0.min.js'}),
+
+        // Then the browser will fetch the browserified bundle, which we serve
+        // from the endpoint further down. This exposes our component so it can be
+        // referenced from the next script block
+        script({src: '/bundle.js'}),
+
+        // This script renders the component in the browser, referencing it from
+        // the browserified bundle, using the same props we used in
+        // renderToString above. We could have used a window-level variable, or
+        // even a JSON-typed script tag, but this option is safe from namespacing
+        // and injection issues, and doesn't require parsing
+        script({dangerouslySetInnerHTML: {__html:
+        'var App = React.createFactory(require("./App"));' +
+        'React.render(App(' + safeStringify(props) + '), document.getElementById("content"))'
+        }})
+    ))
+
+    // Return the page to the browser
+    res.end(html)
+
+
+});
+
+app.get('/bundle.js',function(req,res){
+    res.setHeader('Content-Type', 'text/javascript')
+
+    // Here we invoke browserify to package up our component.
+    // DON'T do it on the fly like this in production - it's very costly -
+    // either compile the bundle ahead of time, or use some smarter middleware
+    // (eg browserify-middleware).
+    // We also use literalify to transform our `require` statements for React
+    // so that it uses the global variable (from the CDN JS file) instead of
+    // bundling it up with everything else
+    browserify()
+        .require('./App')
+        .transform({global: true}, literalify.configure({react: 'window.React'}))
+        .bundle()
+        .pipe(res)
+});
+
+app.post('/',function(req,res){
+    CKIPsocket.sendToCKIP(req.body.insertString);
+    CKIPsocket.waitForCKIP(resCallback,res);
+  //  var s = CKIPsocket.waitForCKIP();
+  //  console.log("should have something: " + s);
+
+
+
+});
+
+function resCallback(res,s){
+    res.write(JSON.stringify(s));
+    res.end();
+    return true;
+}
+
+var server = app.listen(3000, function () {
+
+    var host = server.address().address
+    var port = server.address().port
+
+    console.log('Example app listening at http://%s:%s', host, port)
+
+})
+
+/*
+
 http.createServer(function(req, res) {
 
     // If we hit the homepage, then we want to serve up some HTML - including the
@@ -86,7 +199,7 @@ http.createServer(function(req, res) {
         // so that it uses the global variable (from the CDN JS file) instead of
         // bundling it up with everything else
         browserify()
-            .require('./App').require('./components/connectsocket.js')
+            .require('./App')
             .transform({global: true}, literalify.configure({react: 'window.React'}))
             .bundle()
             .pipe(res)
@@ -103,6 +216,8 @@ http.createServer(function(req, res) {
     console.log('Listening on 3000...')
 })
 
+
+*/
 
 // A utility function to safely escape JSON for embedding in a <script> tag
 function safeStringify(obj) {
